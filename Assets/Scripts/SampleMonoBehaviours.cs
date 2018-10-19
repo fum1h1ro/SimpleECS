@@ -4,8 +4,8 @@ using System.Collections.Generic;
 using UnityEngine;
 
 public class SampleMonoBehaviours : MonoBehaviour {
-	const int Width = 30;
-	const int Height = 30;
+	const int Width = 100;
+	const int Height = 100;
 	const int ObjectCount = Width * Height;
 	public bool _isRoot;
 	Transform _transform;

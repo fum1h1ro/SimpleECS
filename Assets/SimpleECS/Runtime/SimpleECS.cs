@@ -62,6 +62,7 @@ namespace SimpleECS {
 #endif
 			return array;
 		}
+		public virtual void PreUpdate() {}
 		public abstract void PreChunkIteration(Chunk* chunk);
 		public abstract void OnUpdate(int count);
 	}
@@ -497,7 +498,9 @@ again:
 		internal ChunkAllocator _data;
 		internal int _dataSize;
 		internal int _countInChunk;
-		internal int _usedCount;
+		internal int _countInTotal;
+		internal int _usedCountInChunk;
+		internal int _usedCountInTotal;
 		const int AlignmentSize = sizeof(ulong);
 
 		internal ComponentBlock(ArcheType* ptr, EntityDataManager entityDataManager) {
@@ -508,26 +511,34 @@ again:
 			_data = new ChunkAllocator();
 			_dataSize = Util.AlignmentPow2(ArcheType->TotalSize, AlignmentSize);
 			_countInChunk = _data.CalcAlignedCapacity(AlignmentSize) / _dataSize;
-			_usedCount = -1;
+			_countInTotal = 0;
+			_usedCountInChunk = -1;
+			_usedCountInTotal = 0;
 		}
 		public void Dispose() {
 			_data.Dispose();
 		}
 		internal int Allocate(Chunk** chunk, int entityIndex) {
-			if (_usedCount < 0 || _usedCount >= _countInChunk) {// * _data.Count) {
+			if (_usedCountInChunk < 0 || _usedCountInChunk >= _countInChunk) {
 				_data.Allocate(_dataSize * _countInChunk, sizeof(ulong));
-				_usedCount = 0;
+				_usedCountInChunk = 0;
+				_countInTotal = _data.Count * _countInChunk;
 			}
-			int r = _usedCount++;
+			int r = _usedCountInChunk++;
 			*chunk = _data.CurrentChunk;
 			SetEntityIndex(*chunk, r, entityIndex);
+			_usedCountInTotal++;
 			return r;
 		}
 		internal void Free(Chunk* chunk, int indexInChunk, Chunk** newChunk, int* newIndexInChunk) {
-			int lastComponentIndex = --_usedCount;
-			if (_usedCount == 0) return;
-			var lastChunk = _data.GetChunk(lastComponentIndex / _countInChunk);
-			var lastIndexInChunk = lastComponentIndex % _countInChunk;
+			// @bug
+#if false
+			Assert.IsTrue(_usedCountInTotal > 0);
+			int lastIndexInTotal = --_usedCountInTotal;
+			_usedCountInChunk--;
+			if (_usedCountInChunk < 0) _usedCountInChunk = _countInChunk;
+			var lastChunk = _data.GetChunk(lastIndexInTotal / _countInChunk);
+			var lastIndexInChunk = lastIndexInTotal % _countInChunk;
 
 			int lastEntityIndex = GetEntityIndex(lastChunk, lastIndexInChunk);
 			var entityData = _entityDataManager.Get(lastEntityIndex);
@@ -535,6 +546,7 @@ again:
 			CopyInternal(chunk, indexInChunk, entityData->Chunk, entityData->IndexInChunk);
 			entityData->Chunk = chunk;
 			entityData->IndexInChunk = indexInChunk;
+#endif
 		}
 		internal void CopyInternal(Chunk* toChunk, int toIndexInChunk, Chunk* fromChunk, int fromIndexInChunk) {
 			SetEntityIndex(toChunk, toIndexInChunk, GetEntityIndex(fromChunk, fromIndexInChunk));
@@ -567,11 +579,12 @@ again:
 		}
 		internal void Dispatch(ComponentSystem system) {
 			system.Block = this;
-			int nchunk = (_usedCount / _countInChunk) + 1;
+			int nchunk = _data.Count;
+			system.PreUpdate();
 			for (int chunkIndex = 0; chunkIndex < nchunk; ++chunkIndex) {
 				var chunk = _data.GetChunk(chunkIndex);
 				system.PreChunkIteration(chunk);
-				int nentity = Mathf.Min(_usedCount - _countInChunk * chunkIndex, _countInChunk);
+				int nentity = Mathf.Min(_usedCountInTotal - _countInChunk * chunkIndex, _countInChunk);
 				system.OnUpdate(nentity);
 			}
 			system.Block = null;

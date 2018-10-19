@@ -36,9 +36,14 @@ public unsafe class Sample : MonoBehaviour {
 	class MakeMatrixSystem : ComponentSystem {
 		NativeArray<PositionData> positionData;
 		NativeArray<RotationData> rotationData;
+		int _matrixIndex;
 		public Matrix4x4[] Matrices;
+		public List<Matrix4x4[]> MatricesSegments;
 		//
 		public MakeMatrixSystem(ArcheType* archeType) : base(archeType) {
+		}
+		public override void PreUpdate() {
+			_matrixIndex = 0;
 		}
 		public override void PreChunkIteration(Chunk* chunk) {
 			positionData = GetNativeArray<PositionData>(chunk);
@@ -46,19 +51,24 @@ public unsafe class Sample : MonoBehaviour {
 		}
 		public override void OnUpdate(int count) {
 			for (int idx = 0; idx < count; ++idx) {
-				Matrices[idx] = Matrix4x4.TRS(positionData[idx].pos, rotationData[idx].rot, Vector3.one);
+				//Matrices[idx] = Matrix4x4.TRS(positionData[idx].pos, rotationData[idx].rot, Vector3.one);
+				int d = _matrixIndex / 1023;
+				int m = _matrixIndex % 1023;
+				MatricesSegments[d][m] = Matrix4x4.TRS(positionData[idx].pos, rotationData[idx].rot, Vector3.one);
+				++_matrixIndex;
 			}
 		}
 	}
 
 	World _world;
 	Matrix4x4[] _matrices;
+	List<Matrix4x4[]> _matricesSegments = new List<Matrix4x4[]>();
 	MoveSystem _moveSystem;
 	MakeMatrixSystem _makeMatrixSystem;
 	public Mesh _mesh;
 	public Material _material;
-	const int Width = 30;
-	const int Height = 30;
+	const int Width = 100;
+	const int Height = 100;
 	const int ObjectCount = Width * Height;
 
 	void Awake() {
@@ -77,6 +87,15 @@ public unsafe class Sample : MonoBehaviour {
 		_moveSystem = new MoveSystem(_world.ArcheTypeManager.GetOrCreateArcheType(typeof(PositionData)));
 		_makeMatrixSystem = new MakeMatrixSystem(archeType);
 		_makeMatrixSystem.Matrices = _matrices;
+		_makeMatrixSystem.MatricesSegments = _matricesSegments;
+
+		int count = ObjectCount;
+		while (count > 0) {
+			var len = Mathf.Min(count, 1023);
+			var segment = new Matrix4x4[len];
+			_matricesSegments.Add(segment);
+			count -= len;
+		}
 	}
 	void OnDestroy() {
 		_world.Dispose();
@@ -85,6 +104,16 @@ public unsafe class Sample : MonoBehaviour {
 		_moveSystem.Time = Time.realtimeSinceStartup;
 		_world.Dispatch(_moveSystem);
 		_world.Dispatch(_makeMatrixSystem);
-		Graphics.DrawMeshInstanced(_mesh, 0, _material, _matrices, ObjectCount, null, ShadowCastingMode.Off, false);
+#if true
+		foreach (var mtxs in _matricesSegments) {
+			Graphics.DrawMeshInstanced(_mesh, 0, _material, mtxs, mtxs.Length, null, ShadowCastingMode.Off, false);
+		}
+#else
+		foreach (var mtxs in _matricesSegments) {
+			foreach (var mtx in mtxs) {
+				Graphics.DrawMesh(_mesh, mtx, _material, 0, null, 0, null, ShadowCastingMode.Off, false);
+			}
+		}
+#endif
 	}
 }
